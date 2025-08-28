@@ -1,0 +1,25 @@
+[package]
+name = "mercury-lm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = { version = "0.28", default-features = true }
+egui = "0.28"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = [
+    "json",
+    "stream",
+    "blocking",
+    "gzip",
+    "native-tls",
+] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+hf-hub = "0.4"
+directories = "5"
+zip = "0.6"
+which = "6"
+anyhow = "1"
+futures-util = "0.3"
+urlencoding = "2"
