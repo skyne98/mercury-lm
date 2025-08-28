@@ -12,6 +12,7 @@ mod ui;
 mod ui_top;
 mod ui_models;
 mod ui_chat;
+mod ui_settings;
 mod app;
 mod app_impl;
 

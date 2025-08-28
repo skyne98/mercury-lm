@@ -16,30 +16,18 @@ pub fn render_top_panel(app: &mut crate::app::App, ui: &mut egui::Ui) {
         ] {
             ui.selectable_value(&mut app.backend, b, label);
         }
-        if ui.add(crate::ui::light_button("🚀 Get runtime", Color32::from_rgb(166, 227, 161))).clicked() {
-            let _ = crate::runtime::ensure_runtime(app);
-        }
-        if let Some((cur, tot, stage)) = &app.runtime_progress {
-            let frac = tot.map(|t| *cur as f32 / t as f32).unwrap_or(0.0);
-            ui.add(
-                egui::ProgressBar::new(frac)
-                    .text(format!("{stage} {}", human_size(*cur)))
-                    .fill(Color32::from_rgb(249, 226, 175)),
-            );
-        }
-        ui.label(RichText::new(&app.status).color(Color32::from_rgb(205, 214, 244)));
-    });
 
-    ui.separator();
+        ui.separator();
 
-    ui.horizontal(|ui| {
         ui.label(RichText::new("📦 Model repo:").color(Color32::from_rgb(137, 180, 250)));
         ui.text_edit_singleline(&mut app.model_repo);
         ui.label(RichText::new("📄 File:").color(Color32::from_rgb(137, 180, 250)));
         ui.text_edit_singleline(&mut app.model_file);
+
         if ui.add(crate::ui::light_button("⬇️ Download model", Color32::from_rgb(166, 227, 161))).clicked() {
             let _ = crate::runtime::start_model_download(app);
         }
+
         if let Some((cur, tot, stage)) = &app.model_progress {
             let frac = tot.map(|t| *cur as f32 / t as f32).unwrap_or(0.0);
             ui.add(
@@ -49,6 +37,8 @@ pub fn render_top_panel(app: &mut crate::app::App, ui: &mut egui::Ui) {
             );
         }
     });
+
+    ui.separator();
 
     ui.horizontal(|ui| {
         ui.label(RichText::new("🔍 Search HF:").color(Color32::from_rgb(137, 180, 250)));
@@ -124,38 +114,4 @@ pub fn render_top_panel(app: &mut crate::app::App, ui: &mut egui::Ui) {
     if let Some(mid) = &app.served_model_id {
         ui.label(format!("🆔 Server model id: {mid}"));
     }
-
-    ui.horizontal(|ui| {
-        if app.server_ready {
-            ui.label(RichText::new("🟢 Ready").color(Color32::from_rgb(31, 31, 46)).background_color(Color32::from_rgb(166, 227, 161)));
-        } else {
-            ui.label(RichText::new("🟡 Not ready").color(Color32::from_rgb(31, 31, 46)).background_color(Color32::from_rgb(249, 226, 175)));
-        }
-        if ui.add(crate::ui::light_button("▶️ Start server", Color32::from_rgb(166, 227, 161))).clicked() {
-            if app.server_child.is_none() {
-                if let Err(e) = crate::server::start_server(app) {
-                    app.status = format!("Start err: {e}");
-                } else {
-                    app.status = "Server starting…".into();
-                }
-            }
-        }
-        if ui.add(crate::ui::light_button("⏹️ Stop", Color32::from_rgb(243, 139, 168))).clicked() {
-            if let Some(mut c) = app.server_child.take() {
-                let _ = c.kill();
-                app.server_ready = false;
-            }
-        }
-    });
-
-    ui.collapsing(RichText::new("📋 Server logs").color(Color32::from_rgb(137, 180, 250)), |ui| {
-        egui::ScrollArea::vertical()
-            .max_height(200.0)
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                for l in &app.server_log {
-                    ui.monospace(l);
-                }
-            });
-    });
 }

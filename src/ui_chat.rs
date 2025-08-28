@@ -30,13 +30,16 @@ pub fn render_chat_panel(app: &mut crate::app::App, ui: &mut egui::Ui) {
             app.msgs.truncate(t);
         }
         ui.separator();
-        ui.text_edit_multiline(&mut app.input);
+        if ui.text_edit_multiline(&mut app.input).changed() {
+            app.mark_activity(); // Mark activity when user types
+        }
         ui.horizontal(|ui| {
             let sending = app.rx.is_some();
             if ui
                 .add_enabled(!sending, crate::ui::light_button("📤 Send", Color32::from_rgb(166, 227, 161)))
                 .clicked()
             {
+                app.mark_activity(); // Mark activity when sending message
                 if !app.server_ready {
                     app.status = "Server not ready yet".into();
                 }

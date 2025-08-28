@@ -7,6 +7,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::mpsc,
+    time::{Duration, Instant},
 };
 
 pub struct App {
@@ -38,6 +39,14 @@ pub struct App {
     pub loaded_model: Option<String>,
     pub served_model_id: Option<String>,
     pub downloaded: Vec<DownloadedModel>,
+
+    // New automatic management fields
+    pub settings: Settings,
+    pub available_runtimes: Vec<RuntimeInfo>,
+    pub current_runtime: Option<RuntimeInfo>,
+    pub server_status: ServerStatus,
+    pub last_activity: Instant,
+    pub show_settings: bool,
 }
 
 impl Default for App {
@@ -46,9 +55,21 @@ impl Default for App {
         fs::create_dir_all(dir.data_dir()).ok();
         let model_dir = dir.data_dir().join("models");
         let _ = fs::create_dir_all(&model_dir);
+
+        // Load settings
+        let settings_path = dir.data_dir().join("settings.json");
+        let settings = if settings_path.exists() {
+            match fs::read_to_string(&settings_path) {
+                Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+                Err(_) => Settings::default(),
+            }
+        } else {
+            Settings::default()
+        };
+
         let mut app = Self {
             backend: Backend::Auto,
-            status: "Idle".into(),
+            status: "Initializing...".into(),
             runtime_dir: dir.data_dir().to_path_buf(),
             model_dir,
             server_bin: None,
@@ -75,14 +96,34 @@ impl Default for App {
             loaded_model: None,
             served_model_id: None,
             downloaded: vec![],
+
+            // Initialize new fields
+            settings,
+            available_runtimes: vec![],
+            current_runtime: None,
+            server_status: ServerStatus::Stopped,
+            last_activity: Instant::now(),
+            show_settings: false,
         };
-        let bin_dir = app.runtime_dir.join("llama-bin");
-        if bin_dir.exists() {
-            app.server_bin = find_server_bin(&bin_dir);
-            if app.server_bin.is_some() {
-                app.status = "Runtime ready".into();
+
+        // Auto-detect runtimes
+        app.detect_runtimes();
+
+        // Auto-load default runtime if available
+        if let Some(default_name) = &app.settings.default_runtime {
+            if let Some(runtime) = app.available_runtimes.iter().find(|r| r.name == *default_name) {
+                app.current_runtime = Some(runtime.clone());
+                app.server_bin = Some(runtime.path.clone());
+                app.status = format!("Runtime ready: {}", runtime.name);
             }
+        } else if !app.available_runtimes.is_empty() {
+            // Auto-select first available runtime
+            let runtime = app.available_runtimes[0].clone();
+            app.current_runtime = Some(runtime.clone());
+            app.server_bin = Some(runtime.path.clone());
+            app.status = format!("Runtime ready: {}", runtime.name);
         }
+
         // Ensure model directory exists before scanning
         if !app.model_dir.exists() {
             let _ = fs::create_dir_all(&app.model_dir);
@@ -92,6 +133,70 @@ impl Default for App {
         if model_count > 0 {
             app.status = format!("Found {} downloaded model(s)", model_count);
         }
+
         app
+    }
+}
+
+impl App {
+    /// Detect available runtimes in the runtime directory
+    pub fn detect_runtimes(&mut self) {
+        self.available_runtimes.clear();
+        let bin_dir = self.runtime_dir.join("llama-bin");
+
+        if bin_dir.exists() {
+            if let Some(server_bin) = find_server_bin(&bin_dir) {
+                let runtime = RuntimeInfo {
+                    name: "Local Runtime".to_string(),
+                    path: server_bin,
+                    version: "Unknown".to_string(),
+                    backend: Backend::Auto,
+                };
+                self.available_runtimes.push(runtime);
+            }
+        }
+    }
+
+    /// Save current settings to disk
+    pub fn save_settings(&self) -> anyhow::Result<()> {
+        let dir = directories::ProjectDirs::from("dev", "mini", "llama-mini").unwrap();
+        let settings_path = dir.data_dir().join("settings.json");
+        let content = serde_json::to_string_pretty(&self.settings)?;
+        fs::write(settings_path, content)?;
+        Ok(())
+    }
+
+    /// Auto-start server if needed
+    pub fn ensure_server_running(&mut self) {
+        if !self.server_ready && matches!(self.server_status, ServerStatus::Stopped) && self.settings.auto_start_server {
+            if self.server_child.is_none() {
+                self.server_status = ServerStatus::Starting;
+                self.status = "Auto-starting server...".into();
+                if let Err(e) = crate::server::start_server(self) {
+                    self.server_status = ServerStatus::Error(format!("Auto-start failed: {e}"));
+                    self.status = format!("Auto-start err: {e}");
+                }
+            }
+        }
+    }
+
+    /// Auto-stop server after inactivity
+    pub fn check_server_timeout(&mut self) {
+        if self.settings.auto_stop_server && self.server_ready {
+            let timeout = Duration::from_secs(self.settings.server_timeout_minutes as u64 * 60);
+            if self.last_activity.elapsed() > timeout {
+                if let Some(mut child) = self.server_child.take() {
+                    let _ = child.kill();
+                    self.server_ready = false;
+                    self.server_status = ServerStatus::Stopped;
+                    self.status = "Server auto-stopped (inactive)".into();
+                }
+            }
+        }
+    }
+
+    /// Update last activity timestamp
+    pub fn mark_activity(&mut self) {
+        self.last_activity = Instant::now();
     }
 }

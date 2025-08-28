@@ -1,5 +1,5 @@
 use crate::models::*;
-use eframe::egui;
+use eframe::egui::{self, Color32};
 
 impl eframe::App for crate::app::App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -112,6 +112,7 @@ impl eframe::App for crate::app::App {
             while let Ok(line) = lrx.try_recv() {
                 if line.starts_with("[READY]") {
                     self.server_ready = true;
+                    self.server_status = ServerStatus::Running;
                     self.status = "Server ready".into();
                 }
                 if let Some(rest) = line.strip_prefix("[MODEL] ") {
@@ -126,9 +127,85 @@ impl eframe::App for crate::app::App {
             }
         }
 
+        // Automatic server management
+        self.check_server_timeout();
+
+        // Auto-start server when user is active and has messages
+        if !self.msgs.is_empty() && !self.input.is_empty() {
+            self.mark_activity();
+            self.ensure_server_running();
+        }
+
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
-            crate::ui_top::render_top_panel(self, ui);
+            ui.horizontal(|ui| {
+                // Status and controls on the left
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        // Runtime status
+                        if let Some(runtime) = &self.current_runtime {
+                            ui.colored_label(Color32::from_rgb(166, 227, 161),
+                                format!("🖥️ {}", runtime.name));
+                        } else {
+                            ui.colored_label(Color32::from_rgb(243, 139, 168), "❌ No Runtime");
+                        }
+
+                        ui.separator();
+
+                        // Server status
+                        match &self.server_status {
+                            ServerStatus::Running => {
+                                ui.colored_label(Color32::from_rgb(166, 227, 161), "🟢 Server Ready");
+                            }
+                            ServerStatus::Starting => {
+                                ui.colored_label(Color32::from_rgb(249, 226, 175), "⏳ Server Starting...");
+                            }
+                            _ => {
+                                ui.colored_label(Color32::from_rgb(243, 139, 168), "🛑 Server Stopped");
+                            }
+                        }
+
+                        ui.separator();
+
+                        // Current status
+                        ui.label(&self.status);
+                    });
+
+                    // Quick actions
+                    ui.horizontal(|ui| {
+                        if ui.add(crate::ui::light_button("⚙️ Settings", Color32::from_rgb(137, 180, 250))).clicked() {
+                            self.show_settings = !self.show_settings;
+                        }
+
+                        if self.server_ready {
+                            if ui.add(crate::ui::light_button("💬 New Chat", Color32::from_rgb(166, 227, 161))).clicked() {
+                                self.msgs.clear();
+                                self.input.clear();
+                                self.editing = None;
+                                self.status = "New chat started".into();
+                            }
+                        }
+                    });
+                });
+
+                ui.separator();
+
+                // Model management on the right
+                ui.vertical(|ui| {
+                    crate::ui_models::render_downloaded_models(self, ui);
+                });
+            });
         });
+
+        // Settings panel (shown when toggled)
+        if self.show_settings {
+            egui::SidePanel::right("settings")
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        crate::ui_settings::render_settings_panel(self, ui);
+                    });
+                });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             crate::ui_chat::render_chat_panel(self, ui);
